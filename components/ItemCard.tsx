@@ -43,6 +43,11 @@ export default function ItemCard({
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
             className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
             onError={() => setImageBroken(true)}
+            // Marketplace thumbnails already arrive at 13-27 KB, so resizing
+            // them buys little and funnels every card through one optimizer
+            // that manages ~5 images a second. Served straight from the CDN
+            // they load in parallel instead.
+            unoptimized
           />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--text-faint)]">

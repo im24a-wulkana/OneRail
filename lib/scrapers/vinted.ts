@@ -1,21 +1,26 @@
 import { Item } from '../types';
 
 /**
- * Vinted's public catalog API rejects cold requests with 401 — it requires the
- * anonymous session cookies handed out by any page load. So we fetch the
- * homepage once, keep the Set-Cookie jar, and use it for the search.
+ * Vinted no longer exposes a usable JSON API.
  *
- * (A CSRF token used to be required too, but the `"CSRF_TOKEN"` value no
- * longer appears in the HTML and the API accepts requests without it.)
+ * `/api/v2/catalog/items` — the endpoint this scraper used to call — now
+ * answers 404 on every country domain, and no versioned variant replaced it.
+ * The catalogue page itself still renders results server-side, so listings are
+ * parsed out of that HTML instead.
+ *
+ * The markup is stable enough to target: every card carries
+ * `data-testid="product-item-id-<id>"` plus matching `--description-title`,
+ * `--price-text` and `--description-subtitle` nodes. That is still markup
+ * rather than a contract, so a layout change will break this — the parser
+ * returns whatever it can and the orchestrator carries on without Vinted.
  */
 const BASE = 'https://www.vinted.com';
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-/** The API silently caps a page at 96 however large per_page is. */
-const PER_PAGE = 96;
-const DEFAULT_PAGES = 8;
-const REQUEST_TIMEOUT = 7000;
+/** One catalogue page renders 96 cards, the same cap the old API had. */
+const DEFAULT_PAGES = 3;
+const REQUEST_TIMEOUT = 9000;
 
 /** Vinted's human-readable condition strings → the app's vocabulary. */
 const CONDITION_MAP: Record<string, string> = {
@@ -26,91 +31,163 @@ const CONDITION_MAP: Record<string, string> = {
   satisfactory: 'fair',
 };
 
-type VintedItem = {
-  id: number;
-  title?: string;
-  price?: { amount?: string; currency_code?: string };
-  total_item_price?: { amount?: string; currency_code?: string };
-  size_title?: string;
-  status?: string;
-  url?: string;
-  path?: string;
-  photo?: { url?: string; high_resolution?: { timestamp?: number } };
-  photos?: { url?: string; full_size_url?: string }[];
-  brand_title?: string;
-  favourite_count?: number;
-  user?: { login?: string };
-};
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
 
-/** Session cookies are reused across calls; they're cheap but not free. */
-let cachedJar: { value: string; expires: number } | null = null;
-const JAR_TTL = 10 * 60 * 1000;
+/**
+ * Turns the URL slug into a title.
+ *
+ * The card's title node holds only the brand ("Carhartt"), while the slug
+ * carries what the seller actually wrote — `/items/123-carhartt-scrub-pants`.
+ */
+function titleFromSlug(path: string, fallback: string): string {
+  const slug = path.match(/\/items\/\d+-([^?#]+)/)?.[1];
+  if (!slug) return fallback;
+  const words = decodeURIComponent(slug).replace(/-/g, ' ').trim();
+  if (!words) return fallback;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
-async function getSessionCookies(): Promise<string | null> {
-  if (cachedJar && cachedJar.expires > Date.now()) return cachedJar.value;
+/** Splits "W32 · New without tags" into its size and condition halves. */
+function parseSubtitle(subtitle: string | undefined): {
+  size: string | null;
+  condition: string | null;
+} {
+  if (!subtitle) return { size: null, condition: null };
 
-  const response = await fetch(`${BASE}/`, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'text/html,application/xhtml+xml',
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-  });
+  const parts = subtitle
+    .split('·')
+    .map((part) => decodeEntities(part).trim())
+    .filter(Boolean);
 
-  if (!response.ok) return null;
-  // Drain the body so the connection can be reused.
-  await response.text();
+  let size: string | null = null;
+  let condition: string | null = null;
 
-  const jar = (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(';')[0])
-    .join('; ');
+  for (const part of parts) {
+    const mapped = CONDITION_MAP[part.toLowerCase()];
+    if (mapped) condition = mapped;
+    else if (!size) size = part.toUpperCase();
+  }
 
-  if (!jar) return null;
-  cachedJar = { value: jar, expires: Date.now() + JAR_TTL };
-  return jar;
+  return { size, condition };
+}
+
+function parsePrice(text: string | undefined): { amount: number; currency: string } {
+  if (!text) return { amount: 0, currency: 'EUR' };
+
+  const cleaned = decodeEntities(text).trim();
+  // Amounts arrive as "$18.00", "18,00 €" or "£18.00" depending on the domain.
+  const numeric = cleaned.replace(/[^0-9.,]/g, '').replace(/\.(?=\d{3}\b)/g, '');
+  const amount = Number.parseFloat(numeric.replace(',', '.'));
+
+  const currency = cleaned.includes('$')
+    ? 'USD'
+    : cleaned.includes('£')
+      ? 'GBP'
+      : cleaned.includes('€')
+        ? 'EUR'
+        : 'EUR';
+
+  return { amount: Number.isFinite(amount) ? amount : 0, currency };
+}
+
+function parsePage(html: string): Item[] {
+  const items: Item[] = [];
+  const seen = new Set<string>();
+
+  for (const match of html.matchAll(/data-testid="product-item-id-(\d+)"/g)) {
+    const id = match[1];
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    // Each card's nodes sit close together; a bounded window keeps one card's
+    // fields from being picked up by the next.
+    const start = Math.max(0, match.index - 2500);
+    const card = html.slice(start, match.index + 7000);
+
+    const href = card.match(new RegExp(`href="(/items/${id}[^"]*)"`))?.[1];
+    if (!href) continue;
+
+    const brand = card
+      .match(new RegExp(`product-item-id-${id}--description-title[^>]*>([^<]{1,120})<`))?.[1]
+      ?.trim();
+    const priceText = card.match(
+      new RegExp(`product-item-id-${id}--price-text[^>]*>([^<]{1,40})<`),
+    )?.[1];
+    const subtitle = card.match(
+      new RegExp(`product-item-id-${id}--description-subtitle[^>]*>([^<]{1,80})<`),
+    )?.[1];
+    const image = card.match(/<img[^>]+src="(https:\/\/images\d*\.vinted\.net[^"]+)"/)?.[1];
+
+    const { amount, currency } = parsePrice(priceText);
+    const { size, condition } = parseSubtitle(subtitle);
+    const path = decodeEntities(href);
+
+    items.push({
+      id: `vinted-${id}`,
+      platform: 'vinted',
+      title: titleFromSlug(path, brand ? decodeEntities(brand) : 'Untitled listing'),
+      price: amount,
+      currency,
+      size,
+      condition,
+      image_url: image ? decodeEntities(image) : '',
+      external_url: `${BASE}${path.split('?')[0]}`,
+      // The catalogue markup carries no listing date.
+      listed_at: null,
+      description: null,
+      images: image ? [decodeEntities(image)] : [],
+      brand: brand ? decodeEntities(brand) : null,
+      color: null,
+      seller: null,
+      total_price: null,
+      favourites: null,
+    });
+  }
+
+  return items;
 }
 
 export async function scrapeVinted(query: string, pages = DEFAULT_PAGES): Promise<Item[]> {
   try {
-    const jar = await getSessionCookies();
-    if (!jar) {
-      console.error('Vinted: could not obtain session cookies');
-      return [];
-    }
-
-    const headers = {
-      'User-Agent': USER_AGENT,
-      Accept: 'application/json, text/plain, */*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      Cookie: jar,
-      Referer: `${BASE}/`,
-    };
-
-    // Pages are fetched in parallel; serially this takes ~11s and blows the
-    // orchestrator's 8s budget.
     const responses = await Promise.allSettled(
       Array.from({ length: pages }, (_, i) => {
         const url =
-          `${BASE}/api/v2/catalog/items?search_text=${encodeURIComponent(query)}` +
-          `&per_page=${PER_PAGE}&page=${i + 1}`;
-        return fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT) }).then((r) =>
-          r.ok ? r.json() : null,
-        );
+          `${BASE}/catalog?search_text=${encodeURIComponent(query)}` +
+          (i > 0 ? `&page=${i + 1}` : '');
+        return fetch(url, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            Accept: 'text/html,application/xhtml+xml',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        }).then((response) => (response.ok ? response.text() : null));
       }),
     );
 
-    // Pages overlap slightly, so dedupe by listing id.
-    const seen = new Set<number>();
     const items: Item[] = [];
+    const seen = new Set<string>();
 
     for (const response of responses) {
       if (response.status !== 'fulfilled' || !response.value) continue;
-      for (const raw of (response.value.items ?? []) as VintedItem[]) {
-        if (!raw?.id || seen.has(raw.id)) continue;
-        seen.add(raw.id);
-        items.push(toItem(raw));
+      for (const item of parsePage(response.value)) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        items.push(item);
       }
+    }
+
+    if (items.length === 0) {
+      console.error('Vinted: catalogue page returned no parsable listings');
     }
 
     return items;
@@ -118,39 +195,4 @@ export async function scrapeVinted(query: string, pages = DEFAULT_PAGES): Promis
     console.error('Vinted scraper error:', error);
     return [];
   }
-}
-
-function toItem(raw: VintedItem): Item {
-  // `price` is a {amount, currency_code} object, not a flat string.
-  const amount = Number.parseFloat(raw.price?.amount ?? '');
-  const total = Number.parseFloat(raw.total_item_price?.amount ?? '');
-  const totalAmount = Number.isFinite(total) ? total : null;
-  const timestamp = raw.photo?.high_resolution?.timestamp;
-
-  return {
-    id: `vinted-${raw.id}`,
-    platform: 'vinted',
-    title: raw.title ?? 'Untitled listing',
-    price: Number.isFinite(amount) ? amount : 0,
-    currency: raw.price?.currency_code ?? 'EUR',
-    size: raw.size_title?.trim() ? raw.size_title.trim().toUpperCase() : null,
-    condition: raw.status ? (CONDITION_MAP[raw.status.toLowerCase()] ?? null) : null,
-    image_url: raw.photo?.url ?? '',
-    // `url` is absolute; `path` is the relative fallback.
-    external_url: raw.url ?? (raw.path ? `${BASE}${raw.path}` : ''),
-    listed_at: timestamp ? new Date(timestamp * 1000).toISOString() : null,
-
-    // Vinted's search payload has no description, but does carry extra photos
-    // and the fee-inclusive price.
-    description: null,
-    // The search payload already carries every photo (up to ~13).
-    images: (raw.photos ?? [])
-      .map((p) => p.full_size_url ?? p.url)
-      .filter((u): u is string => Boolean(u)),
-    brand: raw.brand_title ?? null,
-    color: null,
-    seller: { name: raw.user?.login ?? null, rating: null, location: null },
-    total_price: totalAmount,
-    favourites: raw.favourite_count ?? null,
-  };
 }

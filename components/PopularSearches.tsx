@@ -1,28 +1,14 @@
-'use client';
-
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 
 /**
- * Most-searched terms on this site. The API falls back to a curated list
- * until enough real searches exist, so this never renders empty.
+ * Most-searched terms on this site, ranked by `lib/popular.ts`.
+ *
+ * The ranking arrives already resolved from the server. It used to be seeded
+ * with a hardcoded list and re-fetched on mount, which meant a curated term
+ * rendered above the real leaders on every load before being swapped out.
  */
 export default function PopularSearches({ initial }: { initial: string[] }) {
-  const [terms, setTerms] = useState(initial);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch('/api/popular', { signal: controller.signal });
-        const data = await res.json();
-        if (Array.isArray(data?.terms) && data.terms.length > 0) setTerms(data.terms);
-      } catch {
-        // Keep the server-rendered list on failure.
-      }
-    })();
-    return () => controller.abort();
-  }, []);
+  const terms = initial;
 
   if (terms.length === 0) return null;
 

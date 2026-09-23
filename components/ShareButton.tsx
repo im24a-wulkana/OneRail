@@ -24,50 +24,16 @@ export default function ShareButton({ item }: { item: Item }) {
     timer.current = setTimeout(() => setState('idle'), 2200);
   };
 
-  /**
-   * Swaps in a shortened link when one is available. Every failure path returns
-   * null so the caller falls back to the full link: shortening is a nicety, and
-   * a share that copies nothing is far worse than a long URL.
-   */
-  const shorten = async (url: string): Promise<string | null> => {
-    try {
-      const res = await fetch('/api/shorten', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data?.success && typeof data.shortUrl === 'string' ? data.shortUrl : null;
-    } catch {
-      return null;
-    }
-  };
-
   const copy = async () => {
     const url = shareUrl(item, window.location.origin);
     try {
-      // Written before the network call on purpose: Safari treats the clipboard
-      // permission as tied to the click, and an intervening await forfeits it.
-      // The long link lands immediately, then upgrades if shortening succeeds.
       await navigator.clipboard.writeText(url);
       flash('copied');
-
-      const short = await shorten(url);
-      if (short) {
-        try {
-          await navigator.clipboard.writeText(short);
-        } catch {
-          // Clipboard already holds the working long link, so nothing to do.
-        }
-      }
     } catch {
       // Clipboard access needs a secure context and can be refused outright.
       // Selecting the text lets the reader copy it by hand instead of failing.
-      // Nothing is on the clipboard yet here, so it is worth waiting for the
-      // short link before offering the text to select.
       const field = document.createElement('textarea');
-      field.value = (await shorten(url)) ?? url;
+      field.value = url;
       field.setAttribute('readonly', '');
       field.style.position = 'fixed';
       field.style.opacity = '0';

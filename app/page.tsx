@@ -5,6 +5,7 @@ import SearchBar from '@/components/SearchBar';
 import SearchHistory from '@/components/SearchHistory';
 import PopularSearches from '@/components/PopularSearches';
 import { getSessionUser } from '@/lib/auth';
+import { getPopularSearches } from '@/lib/popular';
 import {
   PLATFORMS,
   PLATFORM_IDS,
@@ -13,18 +14,12 @@ import {
   spellNumber,
 } from '@/lib/platforms';
 
-/** Server-rendered fallback until /api/popular responds. */
-const SUGGESTIONS = [
-  'Carhartt Detroit jacket',
-  'Levi’s 501 vintage',
-  'Arc’teryx shell',
-  'Doc Martens 1460',
-  'Acne Studios knit',
-];
-
 export default async function Home() {
   // The sign-up pitch is only an invitation while there is no account to make.
-  const user = await getSessionUser();
+  // Popular terms are fetched here rather than seeded from a hardcoded list, so
+  // the first paint already shows the real ranking; the old placeholder always
+  // put a curated term above the genuinely most-searched ones.
+  const [user, popular] = await Promise.all([getSessionUser(), getPopularSearches()]);
 
   return (
     <>
@@ -63,7 +58,7 @@ export default async function Home() {
               <SearchBar autoFocus />
             </div>
 
-            <PopularSearches initial={SUGGESTIONS} />
+            <PopularSearches initial={popular.terms} />
 
             <SearchHistory className="mx-auto mt-8 max-w-xl text-left" />
           </div>

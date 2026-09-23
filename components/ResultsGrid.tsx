@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { SearchX } from 'lucide-react';
 import type { Item, Filters } from '@/lib/types';
@@ -24,6 +24,17 @@ interface ResultsGridProps {
 
 const GRID = 'grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4';
 
+/**
+ * How many cards exist at once.
+ *
+ * A search can return well over a thousand listings, and rendering them all at
+ * once queues just as many image requests. Next's optimizer works through them
+ * at roughly five a second, so a fast scroll outruns it — and because lazy
+ * loading only fires on scroll, the skipped images never load at all. Growing
+ * the list in batches keeps the queue short enough to keep up.
+ */
+const BATCH = 60;
+
 export default function ResultsGrid({
   items,
   filters,
@@ -35,6 +46,39 @@ export default function ResultsGrid({
   onOpen,
 }: ResultsGridProps) {
   const visible = useMemo(() => applyFilters(items, filters, sortBy), [items, filters, sortBy]);
+
+  const [shown, setShown] = useState(BATCH);
+  const sentinel = useRef<HTMLDivElement>(null);
+
+  // A new result set is a different list, so start counting from the top again.
+  // Adjusting during render avoids the extra pass a setState-in-effect costs.
+  const [lastKey, setLastKey] = useState(visible.length);
+  if (lastKey !== visible.length) {
+    setLastKey(visible.length);
+    setShown(BATCH);
+  }
+
+  const rendered = useMemo(() => visible.slice(0, shown), [visible, shown]);
+  const hasMore = shown < visible.length;
+
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node || !hasMore) return;
+
+    // rootMargin loads the next batch slightly before the sentinel is reached,
+    // so the grid stays ahead of the scroll instead of stalling at the bottom.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setShown((count) => Math.min(count + BATCH, visible.length));
+        }
+      },
+      { rootMargin: '600px' },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, visible.length]);
 
   if (isLoading) {
     return (
@@ -82,17 +126,27 @@ export default function ResultsGrid({
   }
 
   return (
-    <div className={GRID}>
-      {visible.map((item, i) => (
-        <ItemCard
-          key={item.id}
-          item={item}
-          index={i}
-          isFavorite={favorites[item.id] ?? false}
-          onFavoriteToggle={onFavoriteToggle}
-          onOpen={onOpen}
-        />
-      ))}
-    </div>
+    <>
+      <div className={GRID}>
+        {rendered.map((item, i) => (
+          <ItemCard
+            key={item.id}
+            item={item}
+            index={i}
+            isFavorite={favorites[item.id] ?? false}
+            onFavoriteToggle={onFavoriteToggle}
+            onOpen={onOpen}
+          />
+        ))}
+      </div>
+
+      {hasMore && (
+        <div ref={sentinel} className="flex justify-center py-8" aria-hidden="true">
+          <span className="text-sm text-[var(--text-faint)]">
+            <span className="tnum">{visible.length - shown}</span> more listings
+          </span>
+        </div>
+      )}
+    </>
   );
 }
