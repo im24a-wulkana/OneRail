@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
 import type { Filters, Platform } from '@/lib/types';
 import { PLATFORMS, LIVE_PLATFORM_IDS } from '@/lib/platforms';
+import { GARMENT_GROUP_NAMES } from '@/lib/garment';
 import { SIZE_GROUPS, type SizeGroupId } from '@/lib/sizes';
 
 const CONDITIONS = ['new', 'like new', 'good', 'fair'];
@@ -18,6 +19,7 @@ interface FilterPanelProps {
 export function countActiveFilters(f: Filters): number {
   return (
     (f.platforms?.length ? 1 : 0) +
+    (f.garments?.length ? 1 : 0) +
     (f.minPrice !== undefined || f.maxPrice !== undefined ? 1 : 0) +
     (f.size ? 1 : 0) +
     (f.condition ? 1 : 0)
@@ -30,6 +32,14 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
   const active = countActiveFilters(filters);
 
   const activeSizeGroup = SIZE_GROUPS.find((g) => g.id === sizeGroup) ?? SIZE_GROUPS[0];
+
+  const toggleGarment = (group: string) => {
+    const current = filters.garments ?? [];
+    const next = current.includes(group)
+      ? current.filter((g) => g !== group)
+      : [...current, group];
+    onFiltersChange({ ...filters, garments: next.length ? next : undefined });
+  };
 
   const togglePlatform = (platform: Platform) => {
     const current = filters.platforms ?? [];
@@ -124,6 +134,29 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
                 }`}
               >
                 {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </Section>
+
+      <Section title="Type">
+        <div className="flex flex-wrap gap-1.5">
+          {GARMENT_GROUP_NAMES.map((group) => {
+            const selected = filters.garments?.includes(group) ?? false;
+            return (
+              <button
+                key={group}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => toggleGarment(group)}
+                className={`rounded-[var(--r-sm)] border px-2.5 py-1.5 text-xs font-medium transition ${
+                  selected
+                    ? 'border-[var(--accent)] bg-[var(--accent-wash)] text-[var(--accent)]'
+                    : 'border-[var(--hairline)] text-[var(--text-muted)] hover:border-[var(--hairline-strong)] hover:text-[var(--text)]'
+                }`}
+              >
+                {group}
               </button>
             );
           })}

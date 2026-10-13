@@ -55,6 +55,8 @@ export type Item = {
 
 export type Filters = {
   platforms?: Platform[];
+  /** Coarse clothing buckets — see GARMENT_GROUPS in lib/garment.ts. */
+  garments?: string[];
   minPrice?: number;
   maxPrice?: number;
   size?: string;

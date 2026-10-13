@@ -59,10 +59,14 @@ export default function ListingDetail({
         });
         if (!res.ok) return;
         const data = await res.json();
+        const images = Array.isArray(data.images) ? data.images : [];
         setExtra({
-          images: Array.isArray(data.images) ? data.images : [],
+          images,
           description: typeof data.description === 'string' ? data.description : null,
         });
+        // The replacement gallery can be shorter than the one being browsed,
+        // which otherwise left the counter reading past its end ("7 / 5").
+        if (images.length > 0) setActive((i) => Math.min(i, images.length - 1));
       } catch {
         // Non-fatal: the cover shot from search is already rendered.
       }
@@ -115,7 +119,7 @@ export default function ListingDetail({
         : item.image_url
           ? [item.image_url]
           : [];
-  // Arrow keys increment blindly, and a refetched gallery can shrink, so clamp.
+  // A refetched gallery can shrink, so clamp on render too.
   const index = gallery.length ? Math.min(active, gallery.length - 1) : 0;
   const current = gallery[index];
   const description = item.description ?? extra?.description ?? null;

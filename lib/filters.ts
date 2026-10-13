@@ -1,4 +1,5 @@
 import type { Item, Filters } from './types';
+import { garmentGroupOf } from './garment';
 import { normalizeSize } from './sizes';
 
 export type SortKey = 'relevance' | 'price-low' | 'price-high' | 'newest';
@@ -13,6 +14,15 @@ export function applyFilters(items: Item[], filters: Filters, sortBy: SortKey): 
 
   if (filters.platforms?.length) {
     result = result.filter((i) => filters.platforms!.includes(i.platform));
+  }
+  if (filters.garments?.length) {
+    const want = new Set(filters.garments);
+    // A title naming no garment matches nothing here rather than being kept,
+    // otherwise selecting "Shoes" would still show every unclassified listing.
+    result = result.filter((i) => {
+      const group = garmentGroupOf(i.title);
+      return group !== null && want.has(group);
+    });
   }
   if (filters.minPrice !== undefined) {
     result = result.filter((i) => i.price >= filters.minPrice!);

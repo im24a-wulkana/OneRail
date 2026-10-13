@@ -137,7 +137,10 @@ export async function GET(request: Request) {
 
     const detail =
       platform === 'grailed' ? await fetchGrailed(id!) : await fetchMercari(id!);
-    writeCache(key, detail);
+    // Only cache a result that actually carries photos. A fetch that times out
+    // returns an empty gallery, and caching that pinned the listing to a single
+    // photo for the next 30 minutes even though the platform had recovered.
+    if (detail.images.length > 0) writeCache(key, detail);
 
     return NextResponse.json({ success: true, ...detail });
   } catch (error) {
