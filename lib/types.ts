@@ -43,6 +43,11 @@ export type Item = {
    */
   category?: string | null;
   /**
+   * Department from the marketplace (Grailed, Poshmark). Other platforms
+   * leave this unset and `genderOf` in lib/gender.ts reads the title instead.
+   */
+  gender?: Gender | null;
+  /**
    * Saved listings only: the price when saved, when it has since dropped.
    * Distinct from `original_price`, which is the pre-conversion figure.
    */
@@ -53,12 +58,20 @@ export type Item = {
   price_checked_at?: string | null;
 };
 
+export type Gender = 'men' | 'women';
+
 export type Filters = {
   platforms?: Platform[];
-  /** Coarse clothing buckets — see GARMENT_GROUPS in lib/garment.ts. */
+  genders?: Gender[];
+  /** Top-level categories — see CATEGORIES in lib/categories.ts. */
   garments?: string[];
+  /** Subcategory ids that narrow a selected category, e.g. "zip-hoodies". */
+  subcategories?: string[];
   minPrice?: number;
   maxPrice?: number;
+  /** Any of these sizes matches. */
+  sizes?: string[];
+  /** @deprecated Single-size filter from older saved searches; read as `sizes`. */
   size?: string;
   condition?: string;
 };

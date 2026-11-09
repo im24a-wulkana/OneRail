@@ -1,6 +1,7 @@
 /**
- * Garment classification, shared by the sold-price comparison (which must not
- * price a tee against hoodies) and the results filter.
+ * Garment classification for the sold-price comparison, which must not price
+ * a tee against hoodies. The results filter has its own, finer taxonomy in
+ * lib/categories.ts.
  *
  * Japanese terms are included because Mercari titles arrive untranslated —
  * translating each one would mean a DeepL call per listing.
@@ -91,45 +92,4 @@ const INTERCHANGEABLE: Garment[][] = [
 export function sameGarment(target: Garment, candidate: Garment): boolean {
   if (target === candidate) return true;
   return INTERCHANGEABLE.some((group) => group.includes(target) && group.includes(candidate));
-}
-
-/* -------------------------------------------------------------------------- */
-/* Filter categories                                                           */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The coarse buckets offered in the results filter.
- *
- * `Garment` is deliberately finer-grained — the price comparison needs to keep
- * a tee apart from a long-sleeve — but that distinction is noise when someone
- * just wants to see jackets. These five group the fine categories into what a
- * shopper actually browses by.
- */
-export const GARMENT_GROUPS = {
-  Jackets: ['outerwear', 'hoodie', 'knitwear'],
-  Shirts: ['shirt', 'tee', 'longsleeve'],
-  Pants: ['pants', 'jeans', 'shorts'],
-  Shoes: ['footwear'],
-  Accessories: ['accessory', 'bag'],
-} as const satisfies Record<string, readonly Garment[]>;
-
-export type GarmentGroup = keyof typeof GARMENT_GROUPS;
-
-export const GARMENT_GROUP_NAMES = Object.keys(GARMENT_GROUPS) as GarmentGroup[];
-
-/** Reverse lookup, built once rather than scanning the groups per listing. */
-const GROUP_OF = new Map<Garment, GarmentGroup>();
-for (const name of GARMENT_GROUP_NAMES) {
-  for (const garment of GARMENT_GROUPS[name]) GROUP_OF.set(garment, name);
-}
-
-/**
- * Which filter bucket a listing belongs to, or null when its title names no
- * garment at all. Skirts and dresses map to no group on purpose: they would
- * sit oddly under any of the five, and a listing with no group is simply not
- * matched by a group filter rather than being hidden outright.
- */
-export function garmentGroupOf(title: string): GarmentGroup | null {
-  const garment = garmentOf(title);
-  return garment ? (GROUP_OF.get(garment) ?? null) : null;
 }

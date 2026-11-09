@@ -46,6 +46,8 @@ type PoshmarkPost = {
   colors?: { name?: string }[];
   creator_username?: string;
   aggregates?: { likes?: number };
+  /** e.g. { message_id: "women" }; also "men", "kids", "home". */
+  department?: { message_id?: string; display?: string };
 };
 
 type PoshmarkResponse = {
@@ -151,5 +153,11 @@ function toItem(post: PoshmarkPost): Item {
     color: post.colors?.[0]?.name ?? null,
     seller: { name: post.creator_username ?? null, rating: null, location: null },
     favourites: post.aggregates?.likes ?? null,
+    gender:
+      post.department?.message_id === 'women'
+        ? 'women'
+        : post.department?.message_id === 'men'
+          ? 'men'
+          : null,
   };
 }

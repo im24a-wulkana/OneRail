@@ -1,6 +1,13 @@
 import type { Item, Filters } from './types';
-import { garmentGroupOf } from './garment';
+import { matchesCategories, normalizeCategoryIds } from './categories';
+import { genderOf } from './gender';
 import { normalizeSize } from './sizes';
+
+/** Selected sizes, folding in the single `size` older saved searches carry. */
+export function selectedSizes(filters: Filters): string[] {
+  const sizes = filters.sizes ?? [];
+  return filters.size && !sizes.includes(filters.size) ? [...sizes, filters.size] : sizes;
+}
 
 export type SortKey = 'relevance' | 'price-low' | 'price-high' | 'newest';
 
@@ -15,14 +22,20 @@ export function applyFilters(items: Item[], filters: Filters, sortBy: SortKey): 
   if (filters.platforms?.length) {
     result = result.filter((i) => filters.platforms!.includes(i.platform));
   }
-  if (filters.garments?.length) {
-    const want = new Set(filters.garments);
-    // A title naming no garment matches nothing here rather than being kept,
-    // otherwise selecting "Shoes" would still show every unclassified listing.
+  if (filters.genders?.length) {
+    // Only listings positively tagged with an unselected gender are dropped.
+    // Most eBay, Vinted and Mercari listings carry no gender at all, and
+    // hiding them would empty those platforms out; they're treated as unisex.
+    const want = new Set(filters.genders);
     result = result.filter((i) => {
-      const group = garmentGroupOf(i.title);
-      return group !== null && want.has(group);
+      const gender = genderOf(i);
+      return gender === null || want.has(gender);
     });
+  }
+  if (filters.garments?.length) {
+    const categories = normalizeCategoryIds(filters.garments);
+    const subcategories = filters.subcategories ?? [];
+    result = result.filter((i) => matchesCategories(i.title, categories, subcategories));
   }
   if (filters.minPrice !== undefined) {
     result = result.filter((i) => i.price >= filters.minPrice!);
@@ -30,11 +43,16 @@ export function applyFilters(items: Item[], filters: Filters, sortBy: SortKey): 
   if (filters.maxPrice !== undefined) {
     result = result.filter((i) => i.price <= filters.maxPrice!);
   }
-  if (filters.size) {
+  const sizes = selectedSizes(filters);
+  if (sizes.length) {
     // Compare normalised values so "US 10", "EU 44", "2XL" and "40 R" all
-    // match the corresponding selection.
-    const want = normalizeSize(filters.size) ?? filters.size.toUpperCase();
-    result = result.filter((i) => normalizeSize(i.size) === want);
+    // match the corresponding selection. A listing matches if it is any of
+    // the selected sizes.
+    const want = new Set(sizes.map((s) => normalizeSize(s) ?? s.toUpperCase()));
+    result = result.filter((i) => {
+      const size = normalizeSize(i.size);
+      return size !== null && want.has(size);
+    });
   }
   if (filters.condition) {
     const want = filters.condition.toLowerCase();

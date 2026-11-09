@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
-import type { Filters, Platform } from '@/lib/types';
+import type { Filters, Gender, Platform } from '@/lib/types';
 import { PLATFORMS, LIVE_PLATFORM_IDS } from '@/lib/platforms';
-import { GARMENT_GROUP_NAMES } from '@/lib/garment';
+import { CATEGORIES, categoryOfSubcategory, normalizeCategoryIds } from '@/lib/categories';
+import { GENDERS } from '@/lib/gender';
+import { selectedSizes } from '@/lib/filters';
 import { SIZE_GROUPS, type SizeGroupId } from '@/lib/sizes';
 
 const CONDITIONS = ['new', 'like new', 'good', 'fair'];
@@ -19,11 +21,21 @@ interface FilterPanelProps {
 export function countActiveFilters(f: Filters): number {
   return (
     (f.platforms?.length ? 1 : 0) +
+    (f.genders?.length ? 1 : 0) +
     (f.garments?.length ? 1 : 0) +
     (f.minPrice !== undefined || f.maxPrice !== undefined ? 1 : 0) +
-    (f.size ? 1 : 0) +
+    (selectedSizes(f).length ? 1 : 0) +
     (f.condition ? 1 : 0)
   );
+}
+
+/** Adds or removes `value`, returning undefined for an empty list. */
+function toggle<T>(list: T[] | undefined, value: T): T[] | undefined {
+  const current = list ?? [];
+  const next = current.includes(value)
+    ? current.filter((v) => v !== value)
+    : [...current, value];
+  return next.length ? next : undefined;
 }
 
 export default function FilterPanel({ filters, onFiltersChange, counts }: FilterPanelProps) {
@@ -32,14 +44,30 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
   const active = countActiveFilters(filters);
 
   const activeSizeGroup = SIZE_GROUPS.find((g) => g.id === sizeGroup) ?? SIZE_GROUPS[0];
+  const sizes = selectedSizes(filters);
+  const categories = normalizeCategoryIds(filters.garments ?? []);
+  const subcategories = filters.subcategories ?? [];
 
-  const toggleGarment = (group: string) => {
-    const current = filters.garments ?? [];
-    const next = current.includes(group)
-      ? current.filter((g) => g !== group)
-      : [...current, group];
-    onFiltersChange({ ...filters, garments: next.length ? next : undefined });
+  const toggleGender = (gender: Gender) =>
+    onFiltersChange({ ...filters, genders: toggle(filters.genders, gender) });
+
+  const toggleSize = (value: string) =>
+    // `size` is the legacy single-size field; fold it into `sizes` on first edit.
+    onFiltersChange({ ...filters, size: undefined, sizes: toggle(sizes, value) });
+
+  const toggleCategory = (id: string) => {
+    const next = toggle(categories, id);
+    // Dropping a category drops any subcategories picked inside it.
+    const keptSubs = subcategories.filter((s) => next?.includes(categoryOfSubcategory(s) ?? ''));
+    onFiltersChange({
+      ...filters,
+      garments: next,
+      subcategories: keptSubs.length ? keptSubs : undefined,
+    });
   };
+
+  const toggleSubcategory = (id: string) =>
+    onFiltersChange({ ...filters, subcategories: toggle(filters.subcategories, id) });
 
   const togglePlatform = (platform: Platform) => {
     const current = filters.platforms ?? [];
@@ -60,6 +88,25 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
 
   const body = (
     <div className="flex flex-col gap-6">
+      <Section title="Gender">
+        <div className="flex flex-wrap gap-1.5">
+          {GENDERS.map(({ id, label }) => (
+            <Chip
+              key={id}
+              selected={filters.genders?.includes(id) ?? false}
+              onClick={() => toggleGender(id)}
+            >
+              {label}
+            </Chip>
+          ))}
+        </div>
+        {filters.genders?.length ? (
+          <p className="mt-2 text-[11px] leading-snug text-[var(--text-faint)]">
+            Listings with no gender stated are kept as unisex.
+          </p>
+        ) : null}
+      </Section>
+
       <Section title="Price">
         <div className="flex items-center gap-2">
           <input
@@ -96,6 +143,7 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
         >
           {SIZE_GROUPS.map((group) => {
             const active = group.id === sizeGroup;
+            const picked = group.options.filter((o) => sizes.includes(o.value)).length;
             return (
               <button
                 key={group.id}
@@ -110,57 +158,82 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
                 }`}
               >
                 {group.label}
+                {picked > 0 && (
+                  <span className="tnum ml-1 rounded-[var(--r-pill)] bg-[var(--accent)] px-1 text-[10px] text-[var(--accent-contrast)]">
+                    {picked}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
 
         <div className="thin-scroll flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
-          {activeSizeGroup.options.map((option) => {
-            const selected = filters.size === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={selected}
-                title={option.label}
-                onClick={() =>
-                  onFiltersChange({ ...filters, size: selected ? undefined : option.value })
-                }
-                className={`rounded-[var(--r-sm)] border px-2.5 py-1.5 text-xs font-medium transition ${
-                  selected
-                    ? 'border-[var(--accent)] bg-[var(--accent-wash)] text-[var(--accent)]'
-                    : 'border-[var(--hairline)] text-[var(--text-muted)] hover:border-[var(--hairline-strong)] hover:text-[var(--text)]'
-                }`}
-              >
-                {option.label}
-              </button>
-            );
-          })}
+          {activeSizeGroup.options.map((option) => (
+            <Chip
+              key={option.value}
+              selected={sizes.includes(option.value)}
+              title={option.label}
+              onClick={() => toggleSize(option.value)}
+            >
+              {option.label}
+            </Chip>
+          ))}
         </div>
+
+        {sizes.length > 0 && (
+          <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[var(--text-faint)]">
+            <span className="truncate" title={sizes.join(', ')}>
+              {sizes.length} selected: {sizes.join(', ')}
+            </span>
+            <button
+              type="button"
+              onClick={() => onFiltersChange({ ...filters, size: undefined, sizes: undefined })}
+              className="shrink-0 font-medium text-[var(--accent)] hover:underline"
+            >
+              Clear
+            </button>
+          </div>
+        )}
       </Section>
 
       <Section title="Type">
         <div className="flex flex-wrap gap-1.5">
-          {GARMENT_GROUP_NAMES.map((group) => {
-            const selected = filters.garments?.includes(group) ?? false;
-            return (
-              <button
-                key={group}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => toggleGarment(group)}
-                className={`rounded-[var(--r-sm)] border px-2.5 py-1.5 text-xs font-medium transition ${
-                  selected
-                    ? 'border-[var(--accent)] bg-[var(--accent-wash)] text-[var(--accent)]'
-                    : 'border-[var(--hairline)] text-[var(--text-muted)] hover:border-[var(--hairline-strong)] hover:text-[var(--text)]'
-                }`}
-              >
-                {group}
-              </button>
-            );
-          })}
+          {CATEGORIES.map((category) => (
+            <Chip
+              key={category.id}
+              selected={categories.includes(category.id)}
+              onClick={() => toggleCategory(category.id)}
+            >
+              {category.label}
+            </Chip>
+          ))}
         </div>
+
+        {/* Subcategories appear under each picked category. Picking none keeps
+            the whole category; picking some narrows it to just those. */}
+        {CATEGORIES.filter((c) => categories.includes(c.id)).map((category) => (
+          <div
+            key={category.id}
+            className="mt-3 border-l-2 border-[var(--hairline)] pl-2.5"
+          >
+            <p className="mb-1.5 text-[11px] font-medium text-[var(--text-faint)]">
+              {category.label}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {category.subcategories.map((sub) => (
+                <Chip
+                  key={sub.id}
+                  small
+                  selected={subcategories.includes(sub.id)}
+                  onClick={() => toggleSubcategory(sub.id)}
+                >
+                  {sub.label}
+                </Chip>
+              ))}
+            </div>
+          </div>
+        ))}
       </Section>
 
       <Section title="Condition">
@@ -295,6 +368,38 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
         </div>
       )}
     </>
+  );
+}
+
+function Chip({
+  selected,
+  onClick,
+  title,
+  small = false,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  title?: string;
+  small?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      title={title}
+      onClick={onClick}
+      className={`rounded-[var(--r-sm)] border font-medium transition ${
+        small ? 'px-2 py-1 text-[11px]' : 'px-2.5 py-1.5 text-xs'
+      } ${
+        selected
+          ? 'border-[var(--accent)] bg-[var(--accent-wash)] text-[var(--accent)]'
+          : 'border-[var(--hairline)] text-[var(--text-muted)] hover:border-[var(--hairline-strong)] hover:text-[var(--text)]'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

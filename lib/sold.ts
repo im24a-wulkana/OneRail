@@ -2,7 +2,6 @@ import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import { randomUUID } from 'node:crypto';
 import { getUsdRate, toUsd } from './currency';
 import { queryTerms, scoreItem, tokenize } from './relevance';
-// Shared with the results filter; see lib/garment.ts.
 import { type Garment, garmentOf, sameGarment } from './garment';
 import type { Item, Platform } from './types';
 

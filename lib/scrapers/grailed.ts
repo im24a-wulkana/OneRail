@@ -51,7 +51,9 @@ type GrailedHit = {
   color?: string;
   location?: string;
   followerno?: number;
-  user?: { username?: string; seller_score?: { rating_average?: number } };
+  /** "menswear" or "womenswear". */
+  department?: string;
+  user?:{ username?: string; seller_score?: { rating_average?: number } };
 };
 
 export async function scrapeGrailed(query: string, limit = DEFAULT_LIMIT): Promise<Item[]> {
@@ -139,5 +141,7 @@ function toItem(hit: GrailedHit): Item {
       location: hit.location ?? null,
     },
     favourites: hit.followerno ?? null,
+    gender:
+      hit.department === 'womenswear' ? 'women' : hit.department === 'menswear' ? 'men' : null,
   };
 }
