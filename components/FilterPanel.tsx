@@ -325,7 +325,9 @@ export default function FilterPanel({ filters, onFiltersChange, counts }: Filter
 
       {/* Desktop rail */}
       <aside className="hidden w-60 shrink-0 md:block">
-        <div className="sticky top-20">
+        {/* The rail is sticky, so anything taller than the viewport could
+            never be scrolled into view. Cap it and let it scroll itself. */}
+        <div className="thin-scroll sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain pr-2 pb-4">
           <h2 className="eyebrow mb-4">Refine</h2>
           {body}
         </div>
