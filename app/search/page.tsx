@@ -1,8 +1,15 @@
 import { Suspense } from 'react';
+import { connection } from 'next/server';
 import Navbar from '@/components/Navbar';
 import SearchContent from './SearchContent';
 
-export default function SearchPage() {
+export default async function SearchPage() {
+  // Render per request instead of prerendering at build time. The results
+  // depend entirely on `?q=`, and the prerendered (query-less) shell left the
+  // client router unable to navigate after a direct load of /search?q=…, so
+  // every later search silently did nothing in production.
+  await connection();
+
   return (
     <>
       <Navbar />

@@ -148,7 +148,9 @@ export default function SearchContent() {
       </Link>
 
       <div className="mb-5 max-w-2xl sm:mb-8">
-        <SearchBar initialQuery={query} size="md" />
+        {/* Keyed on the query so the input follows the URL when it changes
+            without typing — a recent-search chip, or Back/Forward. */}
+        <SearchBar key={query} initialQuery={query} size="md" />
         <SearchHistory className="mt-4" limit={6} />
       </div>
 
